@@ -1,0 +1,31 @@
+{
+  "name": "hebrew-captions-webhook",
+  "version": "1.0.0",
+  "description": "Automated webhook server for Gumroad → Firebase → Email activation",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "node test-webhook.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "firebase-admin": "^12.0.0",
+    "nodemailer": "^6.9.7",
+    "axios": "^1.6.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "keywords": [
+    "webhook",
+    "gumroad",
+    "firebase",
+    "automation"
+  ],
+  "author": "Lashon",
+  "license": "MIT"
+}
