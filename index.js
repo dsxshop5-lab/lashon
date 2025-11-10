@@ -96,6 +96,23 @@ function generatePassword() {
     return password;
 }
 
+/**
+ * Generate activation token
+ * Format: AT-XXXX-XXXX-XXXX
+ */
+function generateActivationToken() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const generateSegment = (length) => {
+        let segment = '';
+        for (let i = 0; i < length; i++) {
+            segment += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return segment;
+    };
+    
+    return `AT-${generateSegment(4)}-${generateSegment(4)}-${generateSegment(4)}`;
+}
+
 // ============================================================
 // GUMROAD WEBHOOK VERIFICATION
 // ============================================================
