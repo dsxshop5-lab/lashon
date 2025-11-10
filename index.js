@@ -50,9 +50,9 @@ const db = admin.firestore();
 const auth = admin.auth();
 
 // Initialize Email Transporter
-let emailTransporter = null;
+let transporter = null;
 try {
-    emailTransporter = nodemailer.createTransport({
+    transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
             user: CONFIG.EMAIL_USER,
