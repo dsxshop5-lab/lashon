@@ -471,27 +471,60 @@ app.post('/webhook/gumroad-v2', async (req, res) => {
             processedAt: new Date().toISOString()
         });
 
-        // Get user ID from email
+        // Get or create user in Firebase
         let userId;
+        let phoneNumber = 'none';
+        let isNewUser = false;
+        
         try {
+            // Try to find existing user
             const userRecord = await admin.auth().getUserByEmail(email);
             userId = userRecord.uid;
             console.log('✅ Found existing Firebase user:', userId);
+            
+            // Get phone number from existing user document
+            const userDoc = await db.collection('users').doc(userId).get();
+            if (userDoc.exists) {
+                const userData = userDoc.data();
+                phoneNumber = userData.phoneNumber || 'none';
+                console.log('📱 Phone from existing user:', phoneNumber);
+            }
         } catch (error) {
-            console.log('⚠️ User not found in Firebase Auth');
-            return res.status(400).json({
-                success: false,
-                error: 'User not found. Please create an account first.'
-            });
-        }
-
-        // Get phone number from existing user document
-        let phoneNumber = 'none';
-        const userDoc = await db.collection('users').doc(userId).get();
-        if (userDoc.exists) {
-            const userData = userDoc.data();
-            phoneNumber = userData.phoneNumber || 'none';
-            console.log('📱 Phone from existing user:', phoneNumber);
+            // User doesn't exist - create new one
+            console.log('ℹ️ User not found - creating new Firebase user');
+            
+            try {
+                const newUserRecord = await admin.auth().createUser({
+                    email: email,
+                    emailVerified: true,
+                    password: 'Lashon2025', // Default password
+                    displayName: full_name || 'Customer'
+                });
+                
+                userId = newUserRecord.uid;
+                isNewUser = true;
+                phoneNumber = 'none';
+                
+                console.log('✅ Created new Firebase user:', userId);
+                
+                // Create user document
+                await db.collection('users').doc(userId).set({
+                    email: email,
+                    phoneNumber: phoneNumber,
+                    trialStartTime: Date.now(),
+                    secondsUsed: 0,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                    createdBy: 'gumroad-webhook'
+                });
+                
+                console.log('✅ User document created');
+            } catch (createError) {
+                console.error('❌ Error creating user:', createError);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Failed to create user account'
+                });
+            }
         }
 
         // Generate activation token
@@ -526,9 +559,24 @@ app.post('/webhook/gumroad-v2', async (req, res) => {
 
         // Send activation email
         const emailSubject = '🎉 טוקן ההפעלה שלך - Hebrew Auto-Captions';
+        const newUserSection = isNewUser ? `
+            <div style="background: #dbeafe; padding: 20px; border-radius: 10px; margin: 20px 0; border-right: 4px solid #3b82f6;">
+                <h2 style="color: #1e40af; margin-top: 0;">🔐 פרטי החשבון שלך:</h2>
+                <p style="color: #1e40af; font-size: 14px; margin: 10px 0;">
+                    <strong>אימייל:</strong> ${email}<br>
+                    <strong>סיסמה:</strong> Lashon2025
+                </p>
+                <p style="color: #1e40af; font-size: 12px; margin: 10px 0;">
+                    השתמש בפרטים אלה כדי להתחבר לתוסף ב-Premiere Pro
+                </p>
+            </div>
+        ` : '';
+        
         const emailHtml = `
             <div dir="rtl" style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
                 <h1 style="color: #dc2626; text-align: center;">🎉 !תודה על הרכישה</h1>
+                
+                ${newUserSection}
                 
                 <div style="background: #dcfce7; padding: 20px; border-radius: 10px; margin: 20px 0; border-right: 4px solid #22c55e;">
                     <h2 style="color: #15803d; margin-top: 0;">🎫 טוקן ההפעלה שלך:</h2>
