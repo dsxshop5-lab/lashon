@@ -425,6 +425,164 @@ app.post('/webhook/gumroad', async (req, res) => {
     }
 });
 
+// Alternative endpoint in case Gumroad blacklisted the original URL
+// Use this URL in Gumroad if the main one doesn't work:
+// https://lashon.onrender.com/webhook/gumroad-v2
+app.post('/webhook/gumroad-v2', async (req, res) => {
+    console.log('\n🔔 WEBHOOK RECEIVED (V2 ENDPOINT):', new Date().toISOString());
+    console.log('Body:', JSON.stringify(req.body, null, 2));
+    
+    try {
+        // Verify webhook
+        if (!verifyGumroadWebhook(req.body, req.headers['x-signature'])) {
+            console.error('❌ Invalid webhook signature');
+            return res.status(401).json({ error: 'Invalid signature' });
+        }
+
+        // Extract purchase info
+        const {
+            sale_id,
+            email,
+            full_name,
+            product_name,
+            price,
+            currency,
+            custom_fields
+        } = req.body;
+
+        console.log('📧 Customer Email:', email);
+        console.log('👤 Customer Name:', full_name || 'undefined');
+        console.log('💰 Amount:', price || 'undefined', currency || 'undefined');
+
+        // Check if this sale was already processed
+        const existingDoc = await db.collection('purchases').doc(sale_id).get();
+        if (existingDoc.exists) {
+            console.log('⚠️ Sale already processed - skipping');
+            return res.json({ 
+                success: true, 
+                message: 'Already processed',
+                duplicate: true 
+            });
+        }
+
+        // Mark sale as processed
+        await db.collection('purchases').doc(sale_id).set({
+            email: email,
+            processedAt: new Date().toISOString()
+        });
+
+        // Get user ID from email
+        let userId;
+        try {
+            const userRecord = await admin.auth().getUserByEmail(email);
+            userId = userRecord.uid;
+            console.log('✅ Found existing Firebase user:', userId);
+        } catch (error) {
+            console.log('⚠️ User not found in Firebase Auth');
+            return res.status(400).json({
+                success: false,
+                error: 'User not found. Please create an account first.'
+            });
+        }
+
+        // Get phone number from existing user document
+        let phoneNumber = 'none';
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            phoneNumber = userData.phoneNumber || 'none';
+            console.log('📱 Phone from existing user:', phoneNumber);
+        }
+
+        // Generate activation token
+        const activationToken = generateActivationToken();
+        console.log('🔑 Generated activation token:', activationToken);
+
+        // Update user document with purchase info
+        const purchaseInfo = {
+            saleId: sale_id,
+            purchaseDate: new Date().toISOString(),
+            phoneNumber: phoneNumber
+        };
+        
+        if (product_name) purchaseInfo.productName = product_name;
+        if (price) purchaseInfo.price = price;
+        if (currency) purchaseInfo.currency = currency;
+        if (full_name) purchaseInfo.customerName = full_name;
+        
+        await db.collection('users').doc(userId).set({
+            purchaseInfo: purchaseInfo
+        }, { merge: true });
+        console.log('✅ Purchase info added to user document');
+
+        // Store activation token in Firestore
+        await db.collection('activationTokens').doc(activationToken).set({
+            email: email,
+            phoneNumber: phoneNumber,
+            createdAt: new Date().toISOString(),
+            used: false
+        });
+        console.log('✅ Activation token stored in Firestore');
+
+        // Send activation email
+        const emailSubject = '🎉 טוקן ההפעלה שלך - Hebrew Auto-Captions';
+        const emailHtml = `
+            <div dir="rtl" style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h1 style="color: #dc2626; text-align: center;">🎉 !תודה על הרכישה</h1>
+                
+                <div style="background: #dcfce7; padding: 20px; border-radius: 10px; margin: 20px 0; border-right: 4px solid #22c55e;">
+                    <h2 style="color: #15803d; margin-top: 0;">🎫 טוקן ההפעלה שלך:</h2>
+                    
+                    <div style="background: white; padding: 20px; border-radius: 8px; text-align: center;">
+                        <div style="font-family: 'Courier New', monospace; font-size: 28px; color: #dc2626; font-weight: 700; letter-spacing: 2px;">
+                            ${activationToken}
+                        </div>
+                    </div>
+                    
+                    <p style="color: #15803d; margin-top: 15px; font-size: 14px;">
+                        העתק את הטוקן הזה והשתמש בו בתוכנת ההפעלה
+                    </p>
+                </div>
+
+                <div style="background: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px 0; border-right: 4px solid #f59e0b;">
+                    <p style="margin: 0; color: #92400e; font-weight: 600;">⚠️ שים לב:</p>
+                    <p style="margin: 5px 0 0 0; color: #92400e;">הטוקן הזה קשור למחשב שלך. תצטרך להריץ את תוכנת ההפעלה מהמחשב שבו תשתמש בתוסף.</p>
+                </div>
+
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #e5e7eb;">
+                    <p style="color: #6b7280; font-size: 12px; text-align: center;">
+                        Hebrew Auto-Captions by Lashon<br>
+                        צריך עזרה? צור קשר: +972534372335
+                    </p>
+                </div>
+            </div>
+        `;
+
+        await transporter.sendMail({
+            from: `"Hebrew Auto-Captions" <${CONFIG.EMAIL_USER}>`,
+            to: email,
+            subject: emailSubject,
+            html: emailHtml
+        });
+
+        console.log('✅ Email sent to:', email);
+        console.log('✅ WEBHOOK PROCESSED SUCCESSFULLY');
+
+        res.json({
+            success: true,
+            message: 'Purchase processed',
+            activationToken: activationToken
+        });
+
+    } catch (error) {
+        console.error('❌ WEBHOOK ERROR:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // ============================================================
 // HEALTH CHECK ENDPOINT
 // ============================================================
