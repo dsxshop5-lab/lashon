@@ -141,6 +141,9 @@ app.post('/webhook/gumroad', async (req, res) => {
         console.log('👤 Customer Name:', full_name);
         console.log('💰 Amount:', price, currency);
         
+        // Extract phone number from custom fields
+        const phoneNumber = custom_fields?.phone || 'none';
+        
         // Check if this sale was already processed
         const existingDoc = await db.collection('purchases').doc(sale_id).get();
         if (existingDoc.exists) {
@@ -160,21 +163,12 @@ app.post('/webhook/gumroad', async (req, res) => {
         let userId;
         let userPassword = null;
         let isNewAccount = false;
-        let phoneNumber = custom_fields?.phone || 'none'; // Default from Gumroad
         
         try {
             // Try to get existing user
             const existingUser = await auth.getUserByEmail(email);
             userId = existingUser.uid;
             console.log('✅ Found existing Firebase user:', userId);
-            
-            // IMPORTANT: Get phone number from existing user document
-            const userDoc = await db.collection('users').doc(userId).get();
-            if (userDoc.exists) {
-                const userData = userDoc.data();
-                phoneNumber = userData.phoneNumber || phoneNumber;
-                console.log('📱 Phone from existing user:', phoneNumber);
-            }
             
         } catch (error) {
             if (error.code === 'auth/user-not-found') {
@@ -212,15 +206,21 @@ app.post('/webhook/gumroad', async (req, res) => {
         }
         
         // Update user document with purchase info (for both new and existing users)
+        // Handle missing fields gracefully
+        const purchaseInfo = {
+            saleId: sale_id,
+            purchaseDate: new Date().toISOString(),
+            phoneNumber: phoneNumber
+        };
+        
+        // Only add fields if they exist
+        if (product_name) purchaseInfo.productName = product_name;
+        if (price) purchaseInfo.price = price;
+        if (currency) purchaseInfo.currency = currency;
+        if (full_name) purchaseInfo.customerName = full_name;
+        
         await db.collection('users').doc(userId).set({
-            purchaseInfo: {
-                saleId: sale_id,
-                productName: product_name,
-                price: price,
-                currency: currency,
-                purchaseDate: new Date().toISOString(),
-                phoneNumber: phoneNumber
-            }
+            purchaseInfo: purchaseInfo
         }, { merge: true });
         console.log('✅ Purchase info added to user document');
         
