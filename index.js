@@ -24,9 +24,16 @@ const CONFIG = {
         process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : '',
     FIREBASE_CLIENT_EMAIL: process.env.FIREBASE_CLIENT_EMAIL,
     
-    // Email configuration (using Gmail)
-    EMAIL_USER: process.env.EMAIL_USER, // your Gmail
-    EMAIL_PASSWORD: process.env.EMAIL_PASSWORD, // Gmail app password
+    // Email configuration
+    EMAIL_SERVICE: process.env.EMAIL_SERVICE || 'gmail', // 'gmail' or 'resend'
+    EMAIL_FROM: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+    
+    // Gmail (if using Gmail)
+    EMAIL_USER: process.env.EMAIL_USER,
+    EMAIL_PASSWORD: process.env.EMAIL_PASSWORD,
+    
+    // Resend (if using Resend - recommended!)
+    RESEND_API_KEY: process.env.RESEND_API_KEY,
     
     // Security
     GUMROAD_WEBHOOK_SECRET: process.env.GUMROAD_WEBHOOK_SECRET || ''
@@ -52,14 +59,29 @@ const auth = admin.auth();
 // Initialize Email Transporter
 let transporter = null;
 try {
-    transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-            user: CONFIG.EMAIL_USER,
-            pass: CONFIG.EMAIL_PASSWORD
-        }
-    });
-    console.log('✅ Email transporter initialized');
+    if (CONFIG.EMAIL_SERVICE === 'resend' && CONFIG.RESEND_API_KEY) {
+        // Use Resend (recommended for transactional emails)
+        transporter = nodemailer.createTransport({
+            host: 'smtp.resend.com',
+            port: 465,
+            secure: true,
+            auth: {
+                user: 'resend',
+                pass: CONFIG.RESEND_API_KEY
+            }
+        });
+        console.log('✅ Email transporter initialized (Resend)');
+    } else {
+        // Fallback to Gmail
+        transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: CONFIG.EMAIL_USER,
+                pass: CONFIG.EMAIL_PASSWORD
+            }
+        });
+        console.log('✅ Email transporter initialized (Gmail)');
+    }
 } catch (error) {
     console.error('❌ Email init error:', error.message);
 }
@@ -411,7 +433,7 @@ app.post('/webhook/gumroad', async (req, res) => {
             }
             
             await emailTransporter.sendMail({
-                from: `"Lashon - Hebrew Captions" <${CONFIG.EMAIL_USER}>`,
+                from: `"Lashon - Hebrew Captions" <${CONFIG.EMAIL_FROM}>`,
                 to: email,
                 subject: emailSubject,
                 html: emailHtml
@@ -624,7 +646,7 @@ app.post('/webhook/gumroad-v2', async (req, res) => {
         `;
 
         await transporter.sendMail({
-            from: `"Hebrew Auto-Captions" <${CONFIG.EMAIL_USER}>`,
+            from: `"Hebrew Auto-Captions" <${CONFIG.EMAIL_FROM}>`,
             to: email,
             subject: emailSubject,
             html: emailHtml
