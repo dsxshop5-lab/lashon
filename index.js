@@ -645,14 +645,40 @@ app.post('/webhook/gumroad-v2', async (req, res) => {
             </div>
         `;
 
-        await transporter.sendMail({
-            from: `"Hebrew Auto-Captions" <${CONFIG.EMAIL_FROM}>`,
-            to: email,
-            subject: emailSubject,
-            html: emailHtml
-        });
+        // Send email using Resend API (not SMTP!)
+        if (CONFIG.EMAIL_SERVICE === 'resend' && CONFIG.RESEND_API_KEY) {
+            // Use Resend HTTP API (reliable, no SMTP blocking!)
+            const resendResponse = await fetch('https://api.resend.com/emails', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${CONFIG.RESEND_API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    from: `Hebrew Auto-Captions <${CONFIG.EMAIL_FROM}>`,
+                    to: [email],
+                    subject: emailSubject,
+                    html: emailHtml
+                })
+            });
 
-        console.log('✅ Email sent to:', email);
+            if (!resendResponse.ok) {
+                const errorData = await resendResponse.json();
+                throw new Error(`Resend API error: ${JSON.stringify(errorData)}`);
+            }
+
+            console.log('✅ Email sent via Resend API to:', email);
+        } else {
+            // Fallback to nodemailer (Gmail SMTP - will likely fail)
+            await transporter.sendMail({
+                from: `"Hebrew Auto-Captions" <${CONFIG.EMAIL_FROM}>`,
+                to: email,
+                subject: emailSubject,
+                html: emailHtml
+            });
+            console.log('✅ Email sent via SMTP to:', email);
+        }
+
         console.log('✅ WEBHOOK PROCESSED SUCCESSFULLY');
 
         res.json({
